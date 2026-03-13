@@ -1,0 +1,81 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "marco-code",
+  "projectDescription": "A minimal LLM-powered coding assistant with an iterative agent loop pattern",
+  "theme": "aspen",
+  "primaryColor": "#7C3AED",
+  "lightColor": "#A78BFA",
+  "darkColor": "#5B21B6",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/agent-loop",
+              "concepts/tools",
+              "concepts/configuration"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/basic-usage",
+              "guides/examples",
+              "guides/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "CLI",
+            "pages": [
+              "api/cli-reference"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "api/tools/read",
+              "api/tools/write",
+              "api/tools/bash"
+            ]
+          },
+          {
+            "group": "Core Functions",
+            "pages": [
+              "api/call-model"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Iterative agent loop pattern for AI-powered coding tasks",
+    "Three essential tools: read, write, and bash execution",
+    "OpenRouter API integration with OpenAI-compatible interface",
+    "Configurable timeout and iteration limits for safe execution",
+    "Comprehensive error handling and tool result feedback"
+  ],
+  "publicApiSurface": [
+    "marco-code -p \"<prompt>\" (CLI command)",
+    "read(file_path: str) -> str",
+    "write(file_path: str, content: str) -> str",
+    "bash(command: str) -> str",
+    "call_model(messages, tools)"
+  ]
+}
