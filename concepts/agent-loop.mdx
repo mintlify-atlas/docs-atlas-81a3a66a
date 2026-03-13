@@ -1,0 +1,214 @@
+---
+title: Agent Loop
+description: Understanding the core agent loop pattern that powers marco-code
+---
+
+## What is the Agent Loop?
+
+The agent loop is the core pattern used by AI coding assistants. It's an iterative process where the LLM repeatedly:
+1. Receives the conversation history
+2. Decides whether to call tools or respond to the user
+3. Executes tools and adds results to the conversation
+4. Repeats until it has enough information to provide a final response
+
+<Info>
+The agent loop is what makes marco-code "agentic" - it can autonomously gather information and perform actions through multiple iterations before responding.
+</Info>
+
+## Data Flow Diagram
+
+Here's the actual data flow diagram from the marco-code source code (lines 8-29):
+
+```
+    User prompt (-p)
+           │
+           ▼
+    ┌─────────────┐
+    │  messages[]  │◄──────────────────────────────┐
+    │  (history)   │                               │
+    └──────┬──────┘                               │
+           │                                       │
+           ▼                                       │
+    ┌─────────────┐    finish_reason="stop"       │
+    │ call_model() ├──────────────────────► print() & exit
+    │  (OpenRouter)│                               │
+    └──────┬──────┘                               │
+           │ tool_calls?                           │
+           ▼                                       │
+    ┌─────────────┐    result string              │
+    │ TOOLS[name] ├───────────────────────────────┘
+    │ read/write/ │
+    │ bash        │
+    └─────────────┘
+```
+
+## Core Components
+
+### messages[]
+
+The conversation history that accumulates throughout the loop. It starts with:
+
+```python
+messages = [
+    {"role": "system", "content": _build_system_prompt()},
+    {"role": "user", "content": args.p},
+]
+```
+
+As the loop progresses, messages are appended:
+- **Assistant messages**: The LLM's responses and tool call requests
+- **Tool messages**: Results from executing tools
+
+### tools
+
+The list of tool definitions (`TOOL_DEFINITIONS`) passed to the LLM on each iteration, defining what actions are available.
+
+### finish_reason
+
+The signal that determines whether the loop continues:
+- `"stop"`: LLM is done, exit the loop and print the final response
+- Other values (like `"tool_calls"`): Continue iterating
+
+## The Loop Implementation
+
+Here's the actual agent loop from `main()` (lines 217-252):
+
+```python
+for _iteration in range(MAX_ITERATIONS):
+    chat = call_model(messages, TOOL_DEFINITIONS)
+
+    if not chat.choices or len(chat.choices) == 0:
+        raise RuntimeError("No choices in response")
+
+    message = chat.choices[0].message
+    messages.append(message)
+
+    # If the LLM requested tool calls, execute them
+    if message.tool_calls:
+        for tool_call in message.tool_calls:
+            fn = tool_call.function
+
+            try:
+                fn_args = json.loads(fn.arguments)
+                print(f"  [tool] {fn.name}({fn_args})", file=sys.stderr)
+                result = TOOLS[fn.name](**fn_args)
+            except (KeyError, json.JSONDecodeError, TypeError) as e:
+                result = f"Error: {type(e).__name__}: {e}"
+            except subprocess.TimeoutExpired as e:
+                result = f"Error: command timed out after {BASH_TIMEOUT}s"
+            except Exception as e:
+                result = f"Error executing {fn.name}: {e}"
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result,
+                }
+            )
+
+    # Exit loop when the LLM is done (no more tool calls)
+    if chat.choices[0].finish_reason == "stop":
+        break
+```
+
+## How It Works Step-by-Step
+
+### Step 1: Call the Model
+
+On each iteration, `call_model()` is invoked with the current conversation history:
+
+```python
+chat = call_model(messages, TOOL_DEFINITIONS)
+```
+
+### Step 2: Add Response to History
+
+The LLM's response is appended to `messages[]` to maintain context:
+
+```python
+message = chat.choices[0].message
+messages.append(message)
+```
+
+### Step 3: Execute Tool Calls
+
+If the LLM requested tools, execute them and append results:
+
+```python
+if message.tool_calls:
+    for tool_call in message.tool_calls:
+        fn = tool_call.function
+        fn_args = json.loads(fn.arguments)
+        result = TOOLS[fn.name](**fn_args)
+        
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": result,
+        })
+```
+
+<Note>
+Tool results are added back into the messages array so the LLM can see what happened and decide what to do next.
+</Note>
+
+### Step 4: Check Exit Condition
+
+If `finish_reason == "stop"`, the LLM is done:
+
+```python
+if chat.choices[0].finish_reason == "stop":
+    break
+```
+
+## MAX_ITERATIONS Limit
+
+<Warning>
+The loop is bounded by `MAX_ITERATIONS = 10` to prevent infinite loops.
+</Warning>
+
+Why it exists:
+- **Safety**: Prevents runaway costs if the LLM gets stuck in a loop
+- **User experience**: Forces a timeout rather than hanging indefinitely
+- **Debugging**: Makes it easier to identify when the agent is spinning
+
+If the limit is reached, a warning is printed (lines 254-257):
+
+```python
+else:
+    print(
+        f"Warning: reached maximum iterations ({MAX_ITERATIONS})",
+        file=sys.stderr,
+    )
+```
+
+## Error Handling in the Loop
+
+The loop includes comprehensive error handling for tool execution:
+
+- **Invalid tool name**: `KeyError` caught if tool doesn't exist in `TOOLS`
+- **Invalid JSON arguments**: `json.JSONDecodeError` for malformed arguments
+- **Type errors**: `TypeError` for argument mismatches
+- **Timeouts**: `subprocess.TimeoutExpired` for long-running bash commands
+- **General errors**: Catch-all `Exception` handler
+
+Errors are converted to strings and passed back to the LLM as tool results, allowing it to recover or adjust its approach.
+
+## Example Flow
+
+Here's what happens when you run `marco-code -p "What files are in the current directory?"`:
+
+1. **Iteration 1**:
+   - LLM receives prompt
+   - Decides to call `bash(command="ls")`
+   - `bash` tool executes, returns file list
+   - Result added to messages[]
+
+2. **Iteration 2**:
+   - LLM receives tool result
+   - Has enough information
+   - Returns text response with `finish_reason="stop"`
+   - Loop exits
+
+3. **Output**: Final response printed to stdout

@@ -1,0 +1,236 @@
+---
+title: write
+description: Write content to a file, creating directories if needed
+---
+
+## Function Signature
+
+```python
+def write(file_path: str, content: str) -> str
+```
+
+Writes the specified content to a file, automatically creating parent directories if they don't exist.
+
+## Parameters
+
+<ParamField path="file_path" type="string" required>
+  The path to the file to write. Can be absolute or relative to the current working directory.
+  
+  Parent directories will be created automatically if they don't exist.
+  
+  **Examples:**
+  - `"output.txt"`
+  - `"./src/config.json"`
+  - `"data/reports/summary.txt"` (creates `data/` and `data/reports/` if needed)
+</ParamField>
+
+<ParamField path="content" type="string" required>
+  The content to write to the file. The file will be overwritten if it already exists.
+  
+  **Behavior:**
+  - Overwrites existing files completely
+  - Creates new files if they don't exist
+  - Writes in text mode with default encoding
+</ParamField>
+
+## Return Value
+
+<ResponseField name="message" type="string">
+  A success message in the format: `"Successfully wrote to {file_path}"`
+  
+  **Example:**
+  ```
+  "Successfully wrote to config.json"
+  ```
+</ResponseField>
+
+## Directory Creation Behavior
+
+The `write` function automatically creates parent directories using:
+
+```python
+os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+```
+
+**Key behaviors:**
+- Creates all intermediate directories in the path
+- `exist_ok=True` means no error if directories already exist
+- If `file_path` has no directory component (e.g., `"file.txt"`), uses current directory (`.`)
+- If parent directories already exist, they are left unchanged
+
+**Examples:**
+```python
+# Creates data/ and data/output/ directories
+write("data/output/results.txt", "...")
+
+# Creates src/ directory
+write("src/main.py", "...")
+
+# No directories to create (writes to current directory)
+write("config.json", "...")
+```
+
+## Exceptions
+
+### PermissionError
+
+Raised when the process lacks permission to write to the file or create directories:
+
+```python
+write("/root/secret.txt", "data")
+# Error: PermissionError: [Errno 13] Permission denied: '/root/secret.txt'
+```
+
+### IsADirectoryError
+
+Raised when attempting to write to an existing directory:
+
+```python
+write("/home/user/", "content")
+# Error: IsADirectoryError: [Errno 21] Is a directory: '/home/user/'
+```
+
+### OSError
+
+Raised for various filesystem errors (disk full, invalid path, etc.):
+
+```python
+write("/dev/null/file.txt", "data")
+# Error: OSError: [Errno 20] Not a directory: '/dev/null'
+```
+
+## Implementation
+
+The `write` function is implemented as:
+
+```python
+def write(file_path: str, content: str) -> str:
+    """Write content to a file, creating directories if needed."""
+    os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+    with open(file_path, "w") as f:
+        f.write(content)
+    return f"Successfully wrote to {file_path}"
+```
+
+**Implementation details:**
+1. Extracts directory path with `os.path.dirname(file_path)`
+2. Creates directories with `os.makedirs(..., exist_ok=True)`
+3. Opens file in write mode (`"w"`), which overwrites existing content
+4. Uses context manager to ensure file is properly closed
+5. Returns success message with the file path
+
+## Usage Examples
+
+<CodeGroup>
+
+```python Create a simple file
+# Tool call from LLM
+{
+  "name": "write",
+  "arguments": {
+    "file_path": "hello.txt",
+    "content": "Hello, World!"
+  }
+}
+
+# Returns:
+"Successfully wrote to hello.txt"
+```
+
+```python Create nested directories
+# Tool call from LLM
+{
+  "name": "write",
+  "arguments": {
+    "file_path": "data/output/results.txt",
+    "content": "Test results: PASS"
+  }
+}
+
+# Creates data/ and data/output/ directories if they don't exist
+# Returns:
+"Successfully wrote to data/output/results.txt"
+```
+
+```python Write JSON configuration
+# Tool call from LLM
+{
+  "name": "write",
+  "arguments": {
+    "file_path": "config.json",
+    "content": "{\n  \"api_url\": \"https://api.example.com\",\n  \"timeout\": 30\n}"
+  }
+}
+
+# Returns:
+"Successfully wrote to config.json"
+```
+
+```python Write Python source code
+# Tool call from LLM
+{
+  "name": "write",
+  "arguments": {
+    "file_path": "src/main.py",
+    "content": "#!/usr/bin/env python3\n\ndef main():\n    print('Hello')\n\nif __name__ == '__main__':\n    main()\n"
+  }
+}
+
+# Creates src/ directory if needed
+# Returns:
+"Successfully wrote to src/main.py"
+```
+
+```python Overwrite existing file
+# First write
+write("data.txt", "Original content")
+# Returns: "Successfully wrote to data.txt"
+
+# Second write overwrites
+write("data.txt", "New content")
+# Returns: "Successfully wrote to data.txt"
+# File now contains only "New content"
+```
+
+</CodeGroup>
+
+## Tool Definition
+
+The tool is defined to the LLM with the following JSON schema:
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "write",
+    "description": "Write the contents to a file",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "The path to the file to write"
+        },
+        "content": {
+          "type": "string",
+          "description": "The content to write to the file"
+        }
+      },
+      "required": ["file_path", "content"]
+    }
+  }
+}
+```
+
+## Error Handling in Agent Loop
+
+When the `write` tool raises an exception, the agent loop catches it and returns an error message to the LLM:
+
+```python
+try:
+    result = write(file_path="output.txt", content="data")
+except Exception as e:
+    result = f"Error executing write: {e}"
+```
+
+The LLM receives this error message and can decide how to proceed.

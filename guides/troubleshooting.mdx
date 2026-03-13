@@ -1,0 +1,471 @@
+---
+title: Troubleshooting
+description: Solutions to common errors and issues when using marco-code
+---
+
+## Common Errors
+
+<AccordionGroup>
+  <Accordion title="RuntimeError: OPENROUTER_API_KEY is not set">
+    **Error Message:**
+    ```
+    RuntimeError: OPENROUTER_API_KEY is not set
+    ```
+    
+    **Cause:** The required API key is missing from your environment.
+    
+    **Solution:**
+    
+    1. Create a `.env` file in your project directory:
+       ```bash
+       touch .env
+       ```
+    
+    2. Add your OpenRouter API key:
+       ```bash
+       OPENROUTER_API_KEY=your_key_here
+       ```
+    
+    3. Verify the key is loaded:
+       ```bash
+       python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(os.getenv('OPENROUTER_API_KEY'))"
+       ```
+    
+    <Note>
+    marco-code uses `python-dotenv` to load `.env` files automatically (see `marco_code.py:42`).
+    </Note>
+    
+    **Alternative:** Export the variable in your shell:
+    ```bash
+    export OPENROUTER_API_KEY=your_key_here
+    marco-code -p "test prompt"
+    ```
+  </Accordion>
+
+  <Accordion title="FileNotFoundError: [Errno 2] No such file or directory">
+    **Error Message:**
+    ```
+    [tool] read({'file_path': 'config.json'})
+    Error: FileNotFoundError: [Errno 2] No such file or directory: 'config.json'
+    ```
+    
+    **Cause:** The assistant tried to read a file that doesn't exist.
+    
+    **Why This Happens:**
+    - You referenced a file in your prompt that doesn't exist
+    - The assistant made an assumption about file location
+    - Typo in the filename
+    
+    **Solution:**
+    
+    1. Check what files exist:
+       ```bash
+       ls -la
+       ```
+    
+    2. Use the correct path in your prompt:
+       ```bash
+       marco-code -p "read ./config/settings.json"  # ✅ Correct path
+       ```
+    
+    3. Or ask the assistant to search first:
+       ```bash
+       marco-code -p "find any JSON config files and read them"
+       ```
+    
+    <Tip>
+    The assistant will see the error message and can adapt. You don't always need to restart - it may try alternative approaches.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="Error: command timed out after 30s">
+    **Error Message:**
+    ```
+    [tool] bash({'command': 'pip install tensorflow'})
+    Error: command timed out after 30s: pip install tensorflow
+    ```
+    
+    **Cause:** The bash command exceeded `BASH_TIMEOUT` (30 seconds, see `marco_code.py:52`).
+    
+    **Common Culprits:**
+    - Package installations (`pip install`, `npm install`)
+    - Large test suites
+    - Long-running builds
+    - Network operations
+    
+    **Solutions:**
+    
+    **Option 1 - Run manually:**
+    ```bash
+    pip install tensorflow  # Run outside marco-code
+    marco-code -p "verify tensorflow is installed"
+    ```
+    
+    **Option 2 - Use faster alternatives:**
+    ```bash
+    # Instead of running tests, check if they exist
+    marco-code -p "list all test files and their purposes"
+    ```
+    
+    **Option 3 - Modify timeout (advanced):**
+    
+    Edit `marco_code.py` and increase `BASH_TIMEOUT`:
+    ```python
+    BASH_TIMEOUT = 120  # 2 minutes
+    ```
+    
+    <Warning>
+    Increasing timeout too high can make marco-code unresponsive if commands hang.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Warning: reached maximum iterations (10)">
+    **Error Message:**
+    ```
+    Warning: reached maximum iterations (10)
+    Stopped: reached maximum iterations without a final response.
+    ```
+    
+    **Cause:** The assistant made 10 tool calls without finishing the task (see `MAX_ITERATIONS` in `marco_code.py:51`).
+    
+    **Why This Happens:**
+    - Task is too complex for one invocation
+    - Assistant is stuck in a loop trying different approaches
+    - Very broad exploratory tasks ("analyze the entire codebase")
+    
+    **Solutions:**
+    
+    **Break into smaller tasks:**
+    ```bash
+    # ❌ Too broad
+    marco-code -p "refactor the entire application for better performance"
+    
+    # ✅ Specific chunks
+    marco-code -p "identify performance bottlenecks in database.py"
+    marco-code -p "add connection pooling to database.py"
+    marco-code -p "add caching to frequently called functions"
+    ```
+    
+    **Continue where it left off:**
+    
+    The assistant's last message (if any) is still printed. You can continue:
+    ```bash
+    # First attempt hits max iterations
+    marco-code -p "analyze all API endpoints"
+    # Output: "I've analyzed /users and /posts endpoints..."
+    
+    # Continue from there
+    marco-code -p "now analyze the remaining endpoints"
+    ```
+    
+    **Review tool calls:**
+    
+    Check stderr to see what the assistant tried. You may spot redundant work:
+    ```
+    [tool] bash({'command': 'find . -name "*.py"'})
+    [tool] read({'file_path': './a.py'})
+    [tool] read({'file_path': './b.py'})
+    [tool] read({'file_path': './c.py'})
+    ...
+    ```
+    
+    If it's reading too many files, be more specific:
+    ```bash
+    marco-code -p "analyze only the auth-related files in src/"
+    ```
+  </Accordion>
+
+  <Accordion title="Error: KeyError / JSONDecodeError">
+    **Error Message:**
+    ```
+    [tool] read({'file_path': 'data.json'})
+    Error: KeyError: 'config'
+    ```
+    Or:
+    ```
+    Error: JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+    ```
+    
+    **Cause:** Tool call error handling caught an exception (see `marco_code.py:232-240`).
+    
+    **Common Scenarios:**
+    
+    1. **KeyError**: Assistant requested a non-existent tool
+       ```python
+       # From marco_code.py:234
+       result = TOOLS[fn.name](**fn_args)  # KeyError if tool not in TOOLS
+       ```
+    
+    2. **JSONDecodeError**: Malformed tool arguments from LLM
+       ```python
+       # From marco_code.py:232
+       fn_args = json.loads(fn.arguments)  # JSONDecodeError if invalid JSON
+       ```
+    
+    **What Happens:**
+    
+    marco-code doesn't crash. Instead:
+    1. The error is caught
+    2. Formatted as a string: `"Error: KeyError: 'nonexistent'"`
+    3. Sent back to the LLM as a tool result
+    4. The assistant can try again with corrected parameters
+    
+    **User Action:**
+    
+    Usually **none required** - the assistant will self-correct. But if it keeps failing:
+    
+    1. **Simplify your prompt** - maybe it's confused about what tools are available
+    2. **Check your OpenRouter/LLM status** - degraded model performance can cause malformed calls
+    3. **Try a different prompt phrasing**
+    
+    <Note>
+    These errors are designed to be recoverable. The test suite verifies this behavior (see `test_marco_code.py:175-218`).
+    </Note>
+  </Accordion>
+
+  <Accordion title="No output or empty response">
+    **Symptom:** Command runs but prints nothing or prints only "Stopped: reached maximum iterations without a final response."
+    
+    **Cause:** The LLM's final message had `content=None` (see `marco_code.py:260-264`).
+    
+    **Why This Happens:**
+    - Hit max iterations while still making tool calls
+    - API issue returned incomplete response
+    - Model chose not to generate text (rare)
+    
+    **Debug Steps:**
+    
+    1. **Check tool calls in stderr:**
+       ```bash
+       marco-code -p "your prompt" 2>&1 | grep tool
+       ```
+       Do you see `[tool]` messages? If yes, tools ran but no final response was generated.
+    
+    2. **Simplify the prompt:**
+       ```bash
+       # Too vague
+       marco-code -p "help"
+       
+       # Specific
+       marco-code -p "list all Python files in current directory"
+       ```
+    
+    3. **Check API connectivity:**
+       ```bash
+       curl -X POST https://openrouter.ai/api/v1/chat/completions \
+         -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+         -H "Content-Type: application/json" \
+         -d '{"model": "anthropic/claude-haiku-4.5", "messages": [{"role": "user", "content": "test"}]}'
+       ```
+  </Accordion>
+
+  <Accordion title="Permission denied errors">
+    **Error Message:**
+    ```
+    [tool] write({'file_path': '/etc/config.txt', 'content': '...'})
+    Error: PermissionError: [Errno 13] Permission denied: '/etc/config.txt'
+    ```
+    
+    **Cause:** Attempting to write to a protected location.
+    
+    **Solutions:**
+    
+    1. **Write to allowed locations:**
+       ```bash
+       marco-code -p "create config.txt in the current directory"
+       ```
+    
+    2. **Run with appropriate permissions** (use caution):
+       ```bash
+       sudo python -m marco_code -p "write to /etc/config.txt"
+       ```
+    
+    <Warning>
+    Be very careful running marco-code with elevated permissions. The assistant will execute bash commands with those privileges.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="UnicodeDecodeError when reading files">
+    **Error Message:**
+    ```
+    [tool] read({'file_path': 'data.bin'})
+    Error: UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff
+    ```
+    
+    **Cause:** The `read` tool opens files in text mode with default encoding (see `marco_code.py:92-94`).
+    
+    **Solution:**
+    
+    Don't read binary files directly. Instead:
+    
+    ```bash
+    # For binary inspection
+    marco-code -p "use hexdump to show the first 100 bytes of data.bin"
+    
+    # For images
+    marco-code -p "check the file type and size of image.png"
+    
+    # For compressed files
+    marco-code -p "list contents of archive.zip without extracting"
+    ```
+    
+    The assistant will use `bash` commands like `file`, `ls -lh`, `hexdump`, `unzip -l`, etc.
+  </Accordion>
+</AccordionGroup>
+
+## Debugging Techniques
+
+### Enable Verbose Tool Output
+
+Tool calls are printed to stderr. Separate stdout and stderr to analyze:
+
+```bash
+marco-code -p "complex task" 2>tools.log 1>output.txt
+
+# Review what tools ran
+cat tools.log
+
+# Review final output
+cat output.txt
+```
+
+### Test Tools Individually
+
+You can import and test marco-code's tools directly:
+
+```python
+from marco_code import read, write, bash
+
+# Test read
+print(read("test.txt"))
+
+# Test write
+write("/tmp/test.txt", "content")
+
+# Test bash
+print(bash("echo hello"))
+```
+
+This helps isolate whether the issue is with:
+- The tool implementation
+- The LLM's decision-making
+- Your prompt phrasing
+
+### Verify Environment
+
+Create a test script to check your setup:
+
+```python
+# check_setup.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+print("API Key set:", bool(os.getenv("OPENROUTER_API_KEY")))
+print("Working directory:", os.getcwd())
+print("Python version:", __import__('sys').version)
+
+try:
+    from marco_code import _get_client
+    client = _get_client()
+    print("Client initialized: ✓")
+except Exception as e:
+    print(f"Client error: {e}")
+```
+
+```bash
+python check_setup.py
+```
+
+## Performance Issues
+
+<AccordionGroup>
+  <Accordion title="Slow response times">
+    **Causes:**
+    - Large files being read
+    - Many tool calls per iteration
+    - Slow bash commands
+    - Network latency to OpenRouter API
+    
+    **Solutions:**
+    
+    1. **Reduce file sizes:**
+       ```bash
+       # Instead of reading entire log
+       marco-code -p "show the last 50 lines of app.log"
+       ```
+    
+    2. **Be more specific:**
+       ```bash
+       # Vague - may explore many files
+       marco-code -p "find the bug"
+       
+       # Specific - direct to the issue
+       marco-code -p "fix the IndexError in process_batch() line 45"
+       ```
+    
+    3. **Optimize bash commands:**
+       ```bash
+       # Slow - reads all files
+       marco-code -p "count TODO comments in the codebase"
+       
+       # Fast - uses grep
+       marco-code -p "use grep to count TODO comments"
+       ```
+  </Accordion>
+
+  <Accordion title="Memory usage concerns">
+    **Issue:** Large files consume memory when read.
+    
+    **Solution:**
+    
+    Process large files via bash commands instead of reading them entirely:
+    
+    ```bash
+    # ❌ Reads entire 500MB log into memory
+    marco-code -p "read server.log and find errors"
+    
+    # ✅ Uses grep - streams through file
+    marco-code -p "use grep to find ERROR lines in server.log"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Getting Help
+
+If you're still stuck:
+
+1. **Check the examples:** See [Examples](/guides/examples) for similar use cases
+2. **Review the source:** marco-code is only ~270 lines - read `marco_code.py` to understand behavior
+3. **Test suite:** Look at `test_marco_code.py` for edge cases and error scenarios
+4. **Simplify:** Try the simplest possible prompt to verify basic functionality:
+   ```bash
+   marco-code -p "create a file called test.txt with the word hello"
+   ```
+
+## Error Reference Table
+
+| Error Type | Source Location | Severity | Recoverable |
+|------------|----------------|----------|-------------|
+| `RuntimeError: OPENROUTER_API_KEY is not set` | `marco_code.py:60` | Fatal | No - fix config |
+| `FileNotFoundError` | `marco_code.py:93` | Tool error | Yes - LLM sees error |
+| `subprocess.TimeoutExpired` | `marco_code.py:112` | Tool error | Yes - LLM sees error |
+| `KeyError` (tool not found) | `marco_code.py:234` | Tool error | Yes - LLM sees error |
+| `JSONDecodeError` | `marco_code.py:232` | Tool error | Yes - LLM sees error |
+| `Maximum iterations` | `marco_code.py:254` | Warning | Yes - continue manually |
+
+<Note>
+"Recoverable" means the assistant can adapt and try alternative approaches. "Fatal" errors require user intervention.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Basic Usage" icon="book" href="/guides/basic-usage">
+    Review fundamental concepts and best practices
+  </Card>
+  <Card title="Examples" icon="code" href="/guides/examples">
+    See working examples for common tasks
+  </Card>
+</CardGroup>

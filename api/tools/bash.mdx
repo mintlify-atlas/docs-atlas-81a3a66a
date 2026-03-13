@@ -1,0 +1,280 @@
+---
+title: bash
+description: Execute a shell command and return stdout + stderr
+---
+
+## Function Signature
+
+```python
+def bash(command: str) -> str
+```
+
+Executes a shell command with a timeout and returns the combined stdout and stderr output.
+
+## Parameters
+
+<ParamField path="command" type="string" required>
+  The shell command to execute. Can be any valid shell command including pipes, redirects, and multiple commands with `&&` or `;`.
+  
+  **Examples:**
+  - `"ls -la"`
+  - `"python script.py"`
+  - `"cat file.txt | grep 'error'"`
+  - `"mkdir temp && cd temp && touch file.txt"`
+</ParamField>
+
+## Return Value
+
+<ResponseField name="output" type="string">
+  The combined stdout and stderr from the command execution.
+  
+  **Format:**
+  ```
+  {stdout}
+  {stderr}
+  ```
+  
+  If stderr is empty, only stdout is returned. If stderr has content, it's appended after a newline.
+</ResponseField>
+
+## Timeout Behavior
+
+Commands are subject to a **30-second timeout** (defined by `BASH_TIMEOUT` constant).
+
+### Timeout Error Format
+
+If a command exceeds the timeout:
+
+```python
+bash("sleep 60")
+# Returns:
+"Error: command timed out after 30s: sleep 60"
+```
+
+The timeout applies to the entire command execution, including:
+- Command startup time
+- All subprocesses spawned by the command
+- I/O operations
+
+## stdout/stderr Handling
+
+The function captures both stdout and stderr:
+
+```python
+# Command that outputs to both streams
+bash("echo 'success' && echo 'warning' >&2")
+# Returns:
+'''
+success
+warning
+'''
+```
+
+**Key behaviors:**
+- Both streams are captured in text mode
+- stderr is appended after stdout (separated by newline)
+- Empty streams are omitted from output
+- Non-zero exit codes do NOT raise exceptions
+
+## Exit Code Handling
+
+The function returns output regardless of exit code:
+
+```python
+# Command fails with exit code 1
+bash("ls /nonexistent")
+# Returns (stderr):
+"ls: cannot access '/nonexistent': No such file or directory"
+
+# Command succeeds with exit code 0
+bash("echo 'hello'")
+# Returns (stdout):
+"hello"
+```
+
+The LLM must interpret the output to determine if the command succeeded.
+
+## Implementation
+
+The `bash` function is implemented as:
+
+```python
+BASH_TIMEOUT = 30  # seconds
+
+def bash(command: str) -> str:
+    """Execute a shell command and return stdout + stderr."""
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True, timeout=BASH_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return f"Error: command timed out after {BASH_TIMEOUT}s: {command}"
+    output = result.stdout
+    if result.stderr:
+        output += "\n" + result.stderr
+    return output
+```
+
+**Implementation details:**
+- Uses `subprocess.run()` with `shell=True` to execute commands
+- `capture_output=True` captures both stdout and stderr
+- `text=True` returns output as strings (not bytes)
+- `timeout=30` enforces 30-second timeout
+- Catches `TimeoutExpired` exception and returns error message
+- Combines stdout and stderr with newline separator
+
+## Security Considerations
+
+<Warning>
+  The `bash` tool uses `shell=True`, which means:
+  - Commands are executed through the system shell
+  - Shell metacharacters (`|`, `&`, `;`, etc.) are interpreted
+  - **User input in prompts could lead to command injection**
+  
+  This is acceptable for marco-code's use case (local development assistant), but would be a security risk in multi-user or production environments.
+</Warning>
+
+## Usage Examples
+
+<CodeGroup>
+
+```python List files
+# Tool call from LLM
+{
+  "name": "bash",
+  "arguments": {
+    "command": "ls -la"
+  }
+}
+
+# Returns:
+'''
+total 24
+drwxr-xr-x 3 user user 4096 Jan 1 12:00 .
+drwxr-xr-x 5 user user 4096 Jan 1 11:00 ..
+-rw-r--r-- 1 user user  123 Jan 1 12:00 config.json
+-rw-r--r-- 1 user user  456 Jan 1 12:00 main.py
+'''
+```
+
+```python Execute Python script
+# Tool call from LLM
+{
+  "name": "bash",
+  "arguments": {
+    "command": "python -c 'print(2 + 2)'"
+  }
+}
+
+# Returns:
+"4"
+```
+
+```python Pipe commands
+# Tool call from LLM
+{
+  "name": "bash",
+  "arguments": {
+    "command": "cat config.json | grep 'api_url'"
+  }
+}
+
+# Returns:
+'  "api_url": "https://api.example.com",'
+```
+
+```python Command with stderr
+# Tool call from LLM
+{
+  "name": "bash",
+  "arguments": {
+    "command": "python script_with_warnings.py"
+  }
+}
+
+# Returns (stdout + stderr):
+'''
+Script output
+Warning: deprecated function used
+'''
+```
+
+```python Failed command
+# Tool call from LLM
+{
+  "name": "bash",
+  "arguments": {
+    "command": "cat nonexistent.txt"
+  }
+}
+
+# Returns (stderr):
+"cat: nonexistent.txt: No such file or directory"
+```
+
+```python Timeout example
+# Tool call from LLM
+{
+  "name": "bash",
+  "arguments": {
+    "command": "sleep 60"
+  }
+}
+
+# Returns after 30 seconds:
+"Error: command timed out after 30s: sleep 60"
+```
+
+```python Multiple commands
+# Tool call from LLM
+{
+  "name": "bash",
+  "arguments": {
+    "command": "mkdir -p temp && cd temp && touch file.txt && ls"
+  }
+}
+
+# Returns:
+"file.txt"
+```
+
+</CodeGroup>
+
+## Tool Definition
+
+The tool is defined to the LLM with the following JSON schema:
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "bash",
+    "description": "Execute a shell command",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The shell command to execute"
+        }
+      },
+      "required": ["command"]
+    }
+  }
+}
+```
+
+## Error Handling in Agent Loop
+
+The agent loop has special handling for timeout errors:
+
+```python
+try:
+    result = bash(command="sleep 60")
+except subprocess.TimeoutExpired as e:
+    result = f"Error: command timed out after {BASH_TIMEOUT}s"
+except Exception as e:
+    result = f"Error executing bash: {e}"
+```
+
+Note: The timeout exception is caught inside the `bash` function, so the agent loop typically receives the timeout error as a string result, not an exception.

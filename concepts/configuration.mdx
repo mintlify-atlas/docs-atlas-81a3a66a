@@ -1,0 +1,279 @@
+---
+title: Configuration
+description: Environment variables, constants, and configuration options for marco-code
+---
+
+## Environment Variables
+
+marco-code uses environment variables for API configuration. These are loaded from a `.env` file using `python-dotenv` (line 42):
+
+```python
+from dotenv import load_dotenv
+load_dotenv()
+```
+
+### Required Variables
+
+<Tabs>
+  <Tab title="OPENROUTER_API_KEY">
+    **OPENROUTER_API_KEY**
+
+    Your OpenRouter API key for authentication.
+
+    **Source code** (line 45):
+    ```python
+    API_KEY = os.getenv("OPENROUTER_API_KEY")
+    ```
+
+    **Usage**:
+    - Required for all API calls
+    - Retrieved when creating the OpenAI client
+    - Validated in `_get_client()` (lines 59-60):
+
+    ```python
+    if not API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
+    ```
+
+    **How to set**:
+
+    Create a `.env` file in your project root:
+
+    ```bash
+    OPENROUTER_API_KEY=your-key-here
+    ```
+
+    <Warning>
+    If `OPENROUTER_API_KEY` is not set, marco-code will raise a `RuntimeError` on first API call.
+    </Warning>
+  </Tab>
+
+  <Tab title="OPENROUTER_BASE_URL">
+    **OPENROUTER_BASE_URL**
+
+    The base URL for the OpenRouter API endpoint.
+
+    **Source code** (line 46):
+    ```python
+    BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
+    ```
+
+    **Default**: `https://openrouter.ai/api/v1`
+
+    **Usage**:
+    - Optional - defaults to OpenRouter's production endpoint
+    - Allows pointing to different endpoints (local proxies, test environments, etc.)
+    - Used when creating the OpenAI client (line 61):
+
+    ```python
+    _client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    ```
+
+    **Example .env file** (from `.env.example`):
+
+    ```bash
+    OPENROUTER_API_KEY=your-key-here
+    OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+    ```
+
+    <Info>
+    You typically don't need to set this unless you're using a custom endpoint or proxy.
+    </Info>
+  </Tab>
+</Tabs>
+
+## Configuration Constants
+
+marco-code defines several constants that control runtime behavior.
+
+### MAX_ITERATIONS
+
+**Source code** (line 51):
+
+```python
+MAX_ITERATIONS = 10
+```
+
+**Purpose**: Limits the number of agent loop iterations to prevent infinite loops.
+
+**Why it exists**:
+- **Cost control**: Prevents runaway API costs
+- **Safety**: Ensures the program eventually terminates
+- **User experience**: Provides a clear upper bound on execution time
+
+**How it's used** (line 217):
+
+```python
+for _iteration in range(MAX_ITERATIONS):
+    chat = call_model(messages, TOOL_DEFINITIONS)
+    # ...
+```
+
+If the limit is reached, a warning is printed (lines 254-257):
+
+```python
+else:
+    print(
+        f"Warning: reached maximum iterations ({MAX_ITERATIONS})",
+        file=sys.stderr,
+    )
+```
+
+<Note>
+10 iterations is usually enough for most tasks. Complex multi-step tasks might hit this limit.
+</Note>
+
+### BASH_TIMEOUT
+
+**Source code** (line 52):
+
+```python
+BASH_TIMEOUT = 30  # seconds
+```
+
+**Purpose**: Maximum execution time for shell commands run via the `bash` tool.
+
+**How it's used** (line 109):
+
+```python
+result = subprocess.run(
+    command, shell=True, capture_output=True, text=True, timeout=BASH_TIMEOUT,
+)
+```
+
+**Timeout handling** (lines 111-112):
+
+```python
+except subprocess.TimeoutExpired:
+    return f"Error: command timed out after {BASH_TIMEOUT}s: {command}"
+```
+
+<Warning>
+30 seconds is enough for most commands, but long-running operations (large builds, downloads) may timeout.
+</Warning>
+
+**Why it exists**:
+- Prevents hanging on stuck or infinite processes
+- Provides predictable execution time
+- Allows the agent loop to continue even if one command hangs
+
+## Model Configuration
+
+### Model Selection
+
+The LLM model is hardcoded in the `call_model()` function (lines 77-78):
+
+```python
+response = client.chat.completions.create(
+    model="anthropic/claude-haiku-4.5",
+    messages=messages,
+    tools=tools,
+)
+```
+
+**Current model**: `anthropic/claude-haiku-4.5`
+
+<Info>
+Claude Haiku 4.5 is a fast, cost-effective model that balances performance and price for coding tasks.
+</Info>
+
+**To change the model**:
+
+Edit the `model` parameter in `call_model()`. OpenRouter supports many models:
+
+- `anthropic/claude-opus-4.5` - Most capable, more expensive
+- `anthropic/claude-sonnet-4.5` - Balanced performance
+- `openai/gpt-4-turbo` - OpenAI's latest
+- [See all models](https://openrouter.ai/models)
+
+### Client Initialization
+
+marco-code uses a **client singleton pattern** to avoid recreating the API client on every request.
+
+**Implementation** (lines 48-62):
+
+```python
+# Module-level client singleton (lazy-initialized on first call)
+_client = None
+
+def _get_client():
+    """Return the shared OpenAI client, creating it on first use."""
+    global _client
+    if _client is None:
+        if not API_KEY:
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+        _client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    return _client
+```
+
+**Why use a singleton?**:
+
+1. **Efficiency**: Client is created only once
+2. **Connection pooling**: HTTP connections can be reused
+3. **Validation**: API key is validated once on first use
+
+**How it's used** (line 76):
+
+```python
+def call_model(messages, tools):
+    client = _get_client()
+    response = client.chat.completions.create(...)
+```
+
+The first call to `call_model()` creates the client; subsequent calls reuse it.
+
+## System Prompt Configuration
+
+The system prompt provides context about the environment to the LLM.
+
+**Implementation** (lines 185-193):
+
+```python
+def _build_system_prompt():
+    """Build a system prompt with working directory context."""
+    return (
+        "You are marco-code, a minimal coding assistant. "
+        "You help users with software engineering tasks by reading files, "
+        "writing files, and executing shell commands.\n\n"
+        f"Working directory: {os.getcwd()}\n"
+        f"Platform: {platform.system()} {platform.release()}\n"
+    )
+```
+
+**What it includes**:
+- Role definition ("marco-code, a minimal coding assistant")
+- Available capabilities (read, write, bash)
+- **Working directory**: Current directory at runtime
+- **Platform**: OS and release info (e.g., "Linux 5.15.0")
+
+**Usage** (line 206):
+
+```python
+messages = [
+    {"role": "system", "content": _build_system_prompt()},
+    {"role": "user", "content": args.p},
+]
+```
+
+<Note>
+The system prompt is sent on every conversation but only built once at startup. Working directory and platform are captured when the program starts.
+</Note>
+
+## Example Configuration
+
+Here's a complete `.env` file example:
+
+```bash
+# Required: Your OpenRouter API key
+OPENROUTER_API_KEY=sk-or-v1-abc123...
+
+# Optional: Custom base URL (defaults to https://openrouter.ai/api/v1)
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+```
+
+With this configuration, marco-code will:
+- Use your API key for authentication
+- Connect to OpenRouter's production endpoint
+- Limit agent loops to 10 iterations
+- Timeout bash commands after 30 seconds
+- Use Claude Haiku 4.5 as the model

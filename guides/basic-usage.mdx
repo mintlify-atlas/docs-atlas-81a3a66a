@@ -1,0 +1,213 @@
+---
+title: Basic Usage
+description: Learn common usage patterns and best practices for marco-code
+---
+
+## How marco-code Works
+
+marco-code uses an **agent loop** pattern where the LLM iteratively:
+1. Receives your prompt
+2. Decides which tools to call (read, write, bash)
+3. Executes the tools
+4. Analyzes the results
+5. Either continues gathering information or responds to you
+
+This loop continues until the assistant has enough context to complete your request (maximum 10 iterations).
+
+## Starting the Assistant
+
+The basic command structure is:
+
+```bash
+marco-code -p "your prompt here"
+```
+
+The `-p` flag is required and contains your instruction to the assistant.
+
+## Working Directory Context
+
+marco-code automatically includes your current working directory and platform information in every request. The assistant receives:
+
+```python
+# From _build_system_prompt() in marco_code.py:186
+"Working directory: /your/current/path\n"
+"Platform: Linux 5.15.0\n"
+```
+
+<Tip>
+You don't need to tell marco-code where you are or what OS you're using - it already knows!
+</Tip>
+
+## Structuring Effective Prompts
+
+### Be Specific About Intent
+
+Good prompts clearly state what you want to accomplish:
+
+<CodeGroup>
+```bash ✅ Good
+marco-code -p "Read setup.py and create a requirements.txt with all dependencies"
+```
+
+```bash ❌ Vague
+marco-code -p "help with dependencies"
+```
+</CodeGroup>
+
+### Reference Files by Path
+
+Since marco-code knows your working directory, use relative paths:
+
+```bash
+marco-code -p "Add error handling to src/utils.py"
+marco-code -p "Fix the bug in ./tests/test_api.py"
+```
+
+### Multi-Step Tasks
+
+You can request complex workflows in a single prompt:
+
+```bash
+marco-code -p "Run the tests, read any failures, and fix the bugs"
+```
+
+The assistant will:
+1. Execute `bash` to run tests
+2. `read` failing test files if needed
+3. `read` the source code
+4. `write` fixes
+5. Optionally re-run tests to verify
+
+## Common Usage Patterns
+
+### Reading and Analyzing Code
+
+```bash
+marco-code -p "Explain what main.py does"
+```
+
+The assistant will `read` the file and provide an explanation.
+
+### Writing New Code
+
+```bash
+marco-code -p "Create a utils/logger.py module with basic logging setup"
+```
+
+The assistant uses the `write` tool, which automatically creates parent directories if needed (see `marco_code.py:99`).
+
+### Running Commands
+
+```bash
+marco-code -p "Check if pytest is installed"
+```
+
+The assistant will use `bash` to run `pip list | grep pytest` or similar.
+
+### Debugging
+
+```bash
+marco-code -p "The app crashes when processing empty input. Find and fix the bug."
+```
+
+The assistant will read relevant files, identify the issue, and write corrected code.
+
+## Best Practices
+
+### 1. Use Descriptive Prompts
+
+Instead of "fix this", say "fix the null pointer error in process_data()"
+
+### 2. Let the Assistant Use Tools
+
+<Note>
+Don't paste file contents into your prompt. Let marco-code read files itself using the `read` tool. This keeps prompts clean and allows the assistant to explore as needed.
+</Note>
+
+### 3. One Task Per Invocation
+
+While multi-step tasks work well, avoid combining unrelated tasks:
+
+<CodeGroup>
+```bash ✅ Related steps
+marco-code -p "Add tests for the new auth module and run them"
+```
+
+```bash ❌ Unrelated tasks
+marco-code -p "Add tests for auth and also refactor the database layer"
+```
+</CodeGroup>
+
+### 4. Review Before Running Bash Commands
+
+The assistant will print tool calls to stderr, so you can see what's being executed:
+
+```
+[tool] bash({'command': 'rm -rf build'})
+```
+
+<Warning>
+marco-code executes bash commands directly. Review destructive operations carefully.
+</Warning>
+
+### 5. Work in Version Control
+
+Always use git or another VCS when using marco-code for code modifications. This gives you an easy rollback path:
+
+```bash
+git status              # See what changed
+git diff               # Review changes
+git checkout -- file   # Revert if needed
+```
+
+## Tool Visibility
+
+marco-code prints all tool calls to stderr so you can see exactly what it's doing:
+
+```bash
+marco-code -p "Count lines in src/"
+```
+
+Output:
+```
+[tool] bash({'command': 'find src -name "*.py" | xargs wc -l'})
+```
+
+This transparency helps you:
+- Understand the assistant's approach
+- Debug issues
+- Learn shell commands and patterns
+- Verify no unintended actions are taken
+
+## Limitations
+
+### Maximum Iterations
+
+marco-code stops after 10 tool call iterations (see `MAX_ITERATIONS` in `marco_code.py:51`). For very complex tasks, you may need to break them into smaller prompts.
+
+### Bash Timeout
+
+Shell commands timeout after 30 seconds (see `BASH_TIMEOUT` in `marco_code.py:52`). Long-running operations like `pip install` or large test suites may timeout.
+
+<Tip>
+For long operations, run them manually and ask marco-code to analyze the results:
+```bash
+pip install -r requirements.txt  # Run manually
+marco-code -p "Read requirements.txt and verify all packages are installed"
+```
+</Tip>
+
+### File Encoding
+
+The `read` tool opens files with default text encoding. Binary files or unusual encodings may cause errors.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Examples" icon="code" href="/guides/examples">
+    See real-world usage scenarios with complete flows
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Solve common errors and issues
+  </Card>
+</CardGroup>

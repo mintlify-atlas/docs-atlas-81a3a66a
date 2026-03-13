@@ -1,0 +1,189 @@
+---
+title: read
+description: Read and return the contents of a file
+---
+
+## Function Signature
+
+```python
+def read(file_path: str) -> str
+```
+
+Reads the entire contents of a file and returns it as a string.
+
+## Parameters
+
+<ParamField path="file_path" type="string" required>
+  The path to the file to read. Can be absolute or relative to the current working directory.
+  
+  **Examples:**
+  - `"config.json"`
+  - `"./src/main.py"`
+  - `"/etc/hosts"`
+</ParamField>
+
+## Return Value
+
+<ResponseField name="content" type="string">
+  The complete contents of the file as a string. The file is read in text mode with default encoding.
+</ResponseField>
+
+## Exceptions
+
+### FileNotFoundError
+
+Raised when the specified file does not exist:
+
+```python
+read("nonexistent.txt")
+# Error: FileNotFoundError: [Errno 2] No such file or directory: 'nonexistent.txt'
+```
+
+### PermissionError
+
+Raised when the process lacks permission to read the file:
+
+```python
+read("/root/secret.txt")
+# Error: PermissionError: [Errno 13] Permission denied: '/root/secret.txt'
+```
+
+### IsADirectoryError
+
+Raised when attempting to read a directory:
+
+```python
+read("/home/user/")
+# Error: IsADirectoryError: [Errno 21] Is a directory: '/home/user/'
+```
+
+### UnicodeDecodeError
+
+Raised when the file contains invalid text encoding:
+
+```python
+read("binary_file.bin")
+# Error: UnicodeDecodeError: 'utf-8' codec can't decode byte...
+```
+
+## Implementation
+
+The `read` function is implemented as:
+
+```python
+def read(file_path: str) -> str:
+    """Read and return the contents of a file."""
+    with open(file_path, "r") as f:
+        return f.read()
+```
+
+- Opens the file in read mode (`"r"`)
+- Uses a context manager to ensure the file is properly closed
+- Returns the entire file contents as a single string
+
+## Usage Examples
+
+<CodeGroup>
+
+```python Read a configuration file
+# Tool call from LLM
+{
+  "name": "read",
+  "arguments": {
+    "file_path": "config.json"
+  }
+}
+
+# Returns:
+'''
+{
+  "api_url": "https://api.example.com",
+  "timeout": 30
+}
+'''
+```
+
+```python Read source code
+# Tool call from LLM
+{
+  "name": "read",
+  "arguments": {
+    "file_path": "./src/main.py"
+  }
+}
+
+# Returns:
+'''
+import sys
+
+def main():
+    print("Hello, World!")
+
+if __name__ == "__main__":
+    main()
+'''
+```
+
+```python Read relative path
+# Tool call from LLM
+{
+  "name": "read",
+  "arguments": {
+    "file_path": "../README.md"
+  }
+}
+
+# Returns the contents of README.md from parent directory
+```
+
+```python Error handling
+# Tool call from LLM
+{
+  "name": "read",
+  "arguments": {
+    "file_path": "missing.txt"
+  }
+}
+
+# Returns error string:
+"Error executing read: [Errno 2] No such file or directory: 'missing.txt'"
+```
+
+</CodeGroup>
+
+## Tool Definition
+
+The tool is defined to the LLM with the following JSON schema:
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "read",
+    "description": "Read and return the contents of a file",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "The path to the file to read"
+        }
+      },
+      "required": ["file_path"]
+    }
+  }
+}
+```
+
+## Error Handling in Agent Loop
+
+When the `read` tool raises an exception, the agent loop catches it and returns an error message to the LLM:
+
+```python
+try:
+    result = read(file_path="config.json")
+except Exception as e:
+    result = f"Error executing read: {e}"
+```
+
+The LLM receives this error message and can decide how to proceed (retry with a different path, inform the user, etc.).

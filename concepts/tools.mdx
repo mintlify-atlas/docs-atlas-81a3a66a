@@ -1,0 +1,361 @@
+---
+title: Tools
+description: Understanding marco-code's tool system and how the LLM uses tools to interact with the filesystem and shell
+---
+
+## Overview
+
+marco-code provides three core tools that enable the LLM to interact with your system:
+
+- **read**: Read file contents
+- **write**: Write content to files
+- **bash**: Execute shell commands
+
+These tools are the LLM's "hands and eyes" - they allow it to gather information and make changes to your codebase.
+
+## Tool Architecture
+
+marco-code's tool system has two main components:
+
+### 1. TOOL_DEFINITIONS
+
+JSON Schema definitions that tell the LLM what tools are available and how to call them (lines 126-182):
+
+```python
+TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read",
+            "description": "Read and return the contents of a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path to the file to read",
+                    }
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    # ... more tools
+]
+```
+
+### 2. TOOLS Mapping
+
+A dictionary that maps tool names to their Python implementations (line 120):
+
+```python
+TOOLS = {"read": read, "write": write, "bash": bash}
+```
+
+<Info>
+When the LLM calls a tool, marco-code looks up the function in this mapping and executes it with the provided arguments.
+</Info>
+
+## Tool Definitions
+
+<Tabs>
+  <Tab title="read">
+    ### read Tool
+
+    Reads and returns the contents of a file.
+
+    **Function Signature** (lines 91-94):
+
+    ```python
+    def read(file_path: str) -> str:
+        """Read and return the contents of a file."""
+        with open(file_path, "r") as f:
+            return f.read()
+    ```
+
+    **Tool Definition**:
+
+    ```python
+    {
+        "type": "function",
+        "function": {
+            "name": "read",
+            "description": "Read and return the contents of a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path to the file to read",
+                    }
+                },
+                "required": ["file_path"],
+            },
+        },
+    }
+    ```
+
+    **Parameters**:
+    - `file_path` (required): Path to the file to read
+
+    **Returns**: The complete file contents as a string
+
+    **Example LLM call**:
+    ```json
+    {
+      "name": "read",
+      "arguments": "{\"file_path\": \"main.py\"}"
+    }
+    ```
+
+    <Note>
+    The read tool reads the entire file. For large files, this could use significant token budget.
+    </Note>
+  </Tab>
+
+  <Tab title="write">
+    ### write Tool
+
+    Writes content to a file, creating parent directories if needed.
+
+    **Function Signature** (lines 97-102):
+
+    ```python
+    def write(file_path: str, content: str) -> str:
+        """Write content to a file, creating directories if needed."""
+        os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+        with open(file_path, "w") as f:
+            f.write(content)
+        return f"Successfully wrote to {file_path}"
+    ```
+
+    **Tool Definition**:
+
+    ```python
+    {
+        "type": "function",
+        "function": {
+            "name": "write",
+            "description": "Write the contents to a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path to the file to write",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file",
+                    },
+                },
+                "required": ["file_path", "content"],
+            },
+        },
+    }
+    ```
+
+    **Parameters**:
+    - `file_path` (required): Path to the file to write
+    - `content` (required): Content to write to the file
+
+    **Returns**: Success message with the file path
+
+    **Example LLM call**:
+    ```json
+    {
+      "name": "write",
+      "arguments": "{\"file_path\": \"hello.py\", \"content\": \"print('Hello!')\"}"
+    }
+    ```
+
+    <Warning>
+    The write tool overwrites the file completely. There's no built-in backup or undo mechanism.
+    </Warning>
+
+    **Automatic directory creation**:
+
+    The tool automatically creates parent directories:
+
+    ```python
+    os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+    ```
+
+    This means writing to `src/utils/helper.py` will create `src/` and `src/utils/` if they don't exist.
+  </Tab>
+
+  <Tab title="bash">
+    ### bash Tool
+
+    Executes a shell command and returns combined stdout and stderr.
+
+    **Function Signature** (lines 105-116):
+
+    ```python
+    def bash(command: str) -> str:
+        """Execute a shell command and return stdout + stderr."""
+        try:
+            result = subprocess.run(
+                command, shell=True, capture_output=True, text=True, timeout=BASH_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            return f"Error: command timed out after {BASH_TIMEOUT}s: {command}"
+        output = result.stdout
+        if result.stderr:
+            output += "\n" + result.stderr
+        return output
+    ```
+
+    **Tool Definition**:
+
+    ```python
+    {
+        "type": "function",
+        "function": {
+            "name": "bash",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute",
+                    }
+                },
+                "required": ["command"],
+            },
+        },
+    }
+    ```
+
+    **Parameters**:
+    - `command` (required): The shell command to execute
+
+    **Returns**: Combined stdout and stderr output
+
+    **Example LLM call**:
+    ```json
+    {
+      "name": "bash",
+      "arguments": "{\"command\": \"ls -la\"}"
+    }
+    ```
+
+    <Warning>
+    Commands are executed with `shell=True`, which means shell features like pipes, redirects, and wildcards work, but also carries security implications if user input isn't trusted.
+    </Warning>
+
+    **Timeout protection**:
+
+    Commands are limited by `BASH_TIMEOUT = 30` seconds (line 52). If exceeded:
+
+    ```python
+    except subprocess.TimeoutExpired:
+        return f"Error: command timed out after {BASH_TIMEOUT}s: {command}"
+    ```
+
+    This prevents hanging on long-running or stuck processes.
+  </Tab>
+</Tabs>
+
+## Tool Execution Flow
+
+When the LLM calls a tool, here's what happens (lines 228-248):
+
+```python
+if message.tool_calls:
+    for tool_call in message.tool_calls:
+        fn = tool_call.function
+
+        try:
+            fn_args = json.loads(fn.arguments)
+            print(f"  [tool] {fn.name}({fn_args})", file=sys.stderr)
+            result = TOOLS[fn.name](**fn_args)
+        except (KeyError, json.JSONDecodeError, TypeError) as e:
+            result = f"Error: {type(e).__name__}: {e}"
+        except subprocess.TimeoutExpired as e:
+            result = f"Error: command timed out after {BASH_TIMEOUT}s"
+        except Exception as e:
+            result = f"Error executing {fn.name}: {e}"
+
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result,
+            }
+        )
+```
+
+### Step-by-Step
+
+1. **Parse arguments**: `json.loads(fn.arguments)` converts JSON string to Python dict
+2. **Log the call**: Print to stderr for debugging
+3. **Look up function**: `TOOLS[fn.name]` retrieves the Python function
+4. **Execute**: `**fn_args` unpacks arguments and calls the function
+5. **Handle errors**: Any exception is caught and converted to an error string
+6. **Return result**: Result (or error) is added to conversation history
+
+<Info>
+Errors are returned as tool results rather than crashing the program. This allows the LLM to see what went wrong and potentially recover.
+</Info>
+
+## Error Handling
+
+marco-code's tool system handles multiple error types:
+
+| Error Type | When It Occurs | How It's Handled |
+|------------|----------------|------------------|
+| `KeyError` | Tool name doesn't exist in `TOOLS` | Return error string to LLM |
+| `json.JSONDecodeError` | Tool arguments aren't valid JSON | Return error string to LLM |
+| `TypeError` | Wrong arguments passed to function | Return error string to LLM |
+| `subprocess.TimeoutExpired` | Bash command exceeds timeout | Return timeout error string |
+| `Exception` | Any other error during execution | Return generic error string |
+
+**Example error handling**:
+
+```python
+try:
+    result = TOOLS[fn.name](**fn_args)
+except Exception as e:
+    result = f"Error executing {fn.name}: {e}"
+```
+
+The error becomes the tool result, allowing the LLM to:
+- See what went wrong
+- Adjust its approach
+- Try a different tool or arguments
+- Report the error to the user
+
+## Extending the Tool System
+
+To add a new tool:
+
+1. **Implement the function**:
+   ```python
+   def my_tool(arg1: str, arg2: int) -> str:
+       """My custom tool description."""
+       # implementation
+       return result
+   ```
+
+2. **Add to TOOLS mapping**:
+   ```python
+   TOOLS = {"read": read, "write": write, "bash": bash, "my_tool": my_tool}
+   ```
+
+3. **Add tool definition**:
+   ```python
+   TOOL_DEFINITIONS.append({
+       "type": "function",
+       "function": {
+           "name": "my_tool",
+           "description": "What this tool does",
+           "parameters": {
+               # JSON Schema for parameters
+           },
+       },
+   })
+   ```
+
+The LLM will automatically be able to use the new tool on the next iteration.

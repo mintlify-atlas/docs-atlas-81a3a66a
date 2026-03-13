@@ -1,80 +1,185 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with marco-code in 5 minutes
 ---
 
-## Get started in three steps
+## Your First Command
 
-Get your documentation site running locally and make your first customization.
+marco-code uses a simple command-line interface. Pass your request with the `-p` flag:
 
-### Step 1: Set up your local environment
+```bash
+marco-code -p "your prompt here"
+```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+The assistant will respond by calling tools (read, write, bash) as needed, then reply with text.
 
-### Step 2: Deploy your changes
+## Basic Example: Read a File
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+Let's ask marco-code to read a file:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+```bash
+marco-code -p "read the contents of README.md"
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+### What Happens
 
-### Step 3: Go live
+1. The LLM receives your prompt and the available tools (read, write, bash)
+2. It decides to call the `read` tool with the file path
+3. marco-code executes the tool and returns the file contents
+4. The LLM summarizes the contents in natural language
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+You'll see tool execution in stderr:
 
-## Next steps
+```
+  [tool] read({'file_path': 'README.md'})
+```
 
-Now that you have your docs running, explore these key features:
+Then the assistant's response in stdout:
 
-<CardGroup cols={2}>
+```
+The README.md file contains an introduction to marco-code...
+```
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+## The Agent Loop in Action
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+marco-code demonstrates the core **agent loop** pattern used by AI coding assistants. Here's how it works:
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+<Steps>
+  <Step title="User sends a prompt">
+    You provide a task via the `-p` argument.
+  </Step>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+  <Step title="LLM decides what to do">
+    The model receives:
+    - Your prompt
+    - Available tools (read, write, bash)
+    - Working directory and platform info
+    - Conversation history from previous iterations
+  </Step>
 
-</CardGroup>
+  <Step title="Tools are executed">
+    If the LLM calls tools, marco-code:
+    - Executes each tool
+    - Appends results to the conversation
+    - Loops back to step 2
+  </Step>
+
+  <Step title="Final response">
+    When the LLM has enough information, it responds with text and stops. The loop exits.
+  </Step>
+</Steps>
+
+<Tip>
+  The loop runs for a maximum of **10 iterations** to prevent infinite loops. You can see this in marco_code.py:52 (`MAX_ITERATIONS = 10`).
+</Tip>
+
+## Example: Write and Run Code
+
+Let's see a more complex example that uses multiple tools:
+
+```bash
+marco-code -p "create a hello.py file that prints 'Hello from marco-code', then run it"
+```
+
+### Expected Output
+
+Tool calls (stderr):
+```
+  [tool] write({'file_path': 'hello.py', 'content': "print('Hello from marco-code')"})
+  [tool] bash({'command': 'python hello.py'})
+```
+
+Assistant response (stdout):
+```
+I've created hello.py and executed it. The output was:
+Hello from marco-code
+
+The script is now in your working directory.
+```
+
+## Available Tools
+
+marco-code provides three tools to the LLM:
+
+| Tool | Description | Example Usage |
+|------|-------------|---------------|
+| `read` | Read file contents | Read config files, source code |
+| `write` | Write/create files | Generate code, create configs |
+| `bash` | Execute shell commands | Run tests, install packages, git commands |
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  Bash commands have a **30-second timeout** (marco_code.py:52). Long-running commands will be terminated.
 </Note>
+
+## Working Directory Context
+
+marco-code automatically tells the LLM:
+- Your current working directory
+- Your platform (OS and version)
+
+This helps the LLM make platform-specific decisions (e.g., using correct path separators).
+
+## Command-Line Arguments
+
+marco-code has a minimal CLI:
+
+```bash
+marco-code -p "your prompt"
+```
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `-p` | Yes | The prompt/task for the assistant |
+
+<Warning>
+  The `-p` argument is required. Running `marco-code` without it will show an error.
+</Warning>
+
+## Tips for Good Prompts
+
+1. **Be specific**: Instead of "fix the code", try "fix the TypeError in main.py line 42"
+2. **Provide context**: Mention relevant files or directories
+3. **One task at a time**: Complex multi-step tasks work best when broken down
+4. **Check the working directory**: Use `pwd` first if you're unsure where you are
+
+## Example Prompts
+
+Here are some real-world examples:
+
+```bash
+# Code analysis
+marco-code -p "what does the calculate_metrics function do in utils.py?"
+
+# Refactoring
+marco-code -p "extract the database logic from main.py into a separate db.py module"
+
+# Testing
+marco-code -p "run pytest and show me any failing tests"
+
+# File operations
+marco-code -p "create a .gitignore file with common Python ignores"
+
+# Shell commands
+marco-code -p "show me the git status and recent commits"
+```
+
+## Viewing Tool Calls
+
+Tool execution is logged to **stderr** so you can see what's happening:
+
+```bash
+# See tool calls in the terminal
+marco-code -p "count lines in all Python files"
+
+# Separate tool logs from output
+marco-code -p "generate report" 2> tools.log
+
+# Suppress tool logs
+marco-code -p "say hello" 2> /dev/null
+```
+
+## Next Steps
+
+- Learn about the [Agent Loop](/concepts/agent-loop) to understand how the iterative pattern works
+- See the [Tools Reference](/concepts/tools) for detailed tool documentation
+- Check out [Examples](/guides/examples) for more complex use cases

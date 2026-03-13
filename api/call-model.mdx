@@ -1,0 +1,314 @@
+---
+title: call_model
+description: Send a request to the LLM with conversation history and available tools
+---
+
+## Function Signature
+
+```python
+def call_model(messages, tools)
+```
+
+Sends a request to the LLM (via OpenRouter) with the conversation history and tool definitions, returning the model's response.
+
+## Parameters
+
+<ParamField path="messages" type="list" required>
+  List of conversation messages representing the full chat history.
+  
+  Each message is a dictionary with:
+  - `role`: `"system"`, `"user"`, `"assistant"`, or `"tool"`
+  - `content`: The message content (string)
+  - Additional fields for assistant messages with tool calls
+  
+  **Example:**
+  ```python
+  [
+    {"role": "system", "content": "You are marco-code..."},
+    {"role": "user", "content": "Read config.json"},
+    {"role": "assistant", "content": "", "tool_calls": [...]},
+    {"role": "tool", "tool_call_id": "123", "content": "{...}"}
+  ]
+  ```
+</ParamField>
+
+<ParamField path="tools" type="list" required>
+  List of tool definitions in OpenAI function calling format.
+  
+  Each tool is defined with JSON Schema:
+  ```python
+  [
+    {
+      "type": "function",
+      "function": {
+        "name": "read",
+        "description": "Read and return the contents of a file",
+        "parameters": {...}
+      }
+    },
+    ...
+  ]
+  ```
+  
+  In marco-code, this is the `TOOL_DEFINITIONS` constant with `read`, `write`, and `bash` tools.
+</ParamField>
+
+## Return Value
+
+<ResponseField name="response" type="ChatCompletion">
+  The API response object from the OpenAI-compatible API.
+  
+  **Key fields:**
+  - `choices[0].message`: The assistant's response message
+  - `choices[0].message.content`: Text response (if any)
+  - `choices[0].message.tool_calls`: List of tool calls (if any)
+  - `choices[0].finish_reason`: `"stop"` (complete) or `"tool_calls"` (needs tools)
+  
+  **Example structure:**
+  ```python
+  {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "I'll read that file for you.",
+          "tool_calls": [
+            {
+              "id": "call_abc123",
+              "type": "function",
+              "function": {
+                "name": "read",
+                "arguments": '{"file_path": "config.json"}'
+              }
+            }
+          ]
+        },
+        "finish_reason": "tool_calls"
+      }
+    ]
+  }
+  ```
+</ResponseField>
+
+## Client Singleton
+
+The `call_model` function uses a module-level client singleton for efficiency:
+
+```python
+_client = None
+
+def _get_client():
+    """Return the shared OpenAI client, creating it on first use."""
+    global _client
+    if _client is None:
+        if not API_KEY:
+            raise RuntimeError("OPENROUTER_API_KEY is not set")
+        _client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    return _client
+```
+
+**Benefits:**
+- Client is created only once per program execution
+- Reused across all `call_model()` invocations
+- Connection pooling and session reuse
+- Lazy initialization (only created when needed)
+
+**Configuration:**
+- `API_KEY`: From `OPENROUTER_API_KEY` environment variable
+- `BASE_URL`: From `OPENROUTER_BASE_URL` env var (default: `https://openrouter.ai/api/v1`)
+
+## Model Configuration
+
+The function uses a fixed model configuration:
+
+```python
+response = client.chat.completions.create(
+    model="anthropic/claude-haiku-4.5",
+    messages=messages,
+    tools=tools,
+)
+```
+
+**Model details:**
+- **Model**: `anthropic/claude-haiku-4.5` (via OpenRouter)
+- **Provider**: Anthropic (Claude Haiku)
+- **Version**: 4.5 (latest Haiku version)
+- **Capabilities**: Function calling, long context, fast responses
+
+**Note:** The model is hardcoded in the source. To use a different model, modify line 78 in `marco_code.py`.
+
+## Implementation
+
+Complete implementation:
+
+```python
+def call_model(messages, tools):
+    """
+    Send a request to the LLM with conversation history and available tools.
+
+    Args:
+        messages: List of conversation messages (user, assistant, tool results)
+        tools: List of tool definitions the LLM can choose to call
+
+    Returns:
+        The API response containing the LLM's reply (text and/or tool calls)
+    """
+    client = _get_client()
+    response = client.chat.completions.create(
+        model="anthropic/claude-haiku-4.5",
+        messages=messages,
+        tools=tools,
+    )
+    return response
+```
+
+## Usage in Agent Loop
+
+The `call_model` function is the core of marco-code's agent loop:
+
+```python
+for _iteration in range(MAX_ITERATIONS):
+    # Call the model with current conversation state
+    chat = call_model(messages, TOOL_DEFINITIONS)
+    
+    if not chat.choices or len(chat.choices) == 0:
+        raise RuntimeError("No choices in response")
+    
+    message = chat.choices[0].message
+    messages.append(message)  # Add response to history
+    
+    # Execute any tool calls
+    if message.tool_calls:
+        for tool_call in message.tool_calls:
+            # Execute tool and append result to messages
+            ...
+    
+    # Exit when model is done
+    if chat.choices[0].finish_reason == "stop":
+        break
+```
+
+**Agent loop flow:**
+1. Call model with current message history
+2. Append model's response to history
+3. If model requested tools, execute them and append results
+4. Repeat until model returns `finish_reason="stop"`
+5. Print final response and exit
+
+## Usage Examples
+
+<CodeGroup>
+
+```python Initial call with user prompt
+messages = [
+    {"role": "system", "content": "You are marco-code..."},
+    {"role": "user", "content": "Read config.json"}
+]
+
+response = call_model(messages, TOOL_DEFINITIONS)
+
+# Response has tool call:
+# response.choices[0].message.tool_calls[0].function.name == "read"
+# response.choices[0].message.tool_calls[0].function.arguments == '{"file_path": "config.json"}'
+```
+
+```python After executing tool
+messages = [
+    {"role": "system", "content": "You are marco-code..."},
+    {"role": "user", "content": "Read config.json"},
+    {"role": "assistant", "content": "", "tool_calls": [...]},
+    {"role": "tool", "tool_call_id": "call_123", "content": '{"api": "..."}'}
+]
+
+response = call_model(messages, TOOL_DEFINITIONS)
+
+# Response completes the task:
+# response.choices[0].message.content == "The config file contains..."
+# response.choices[0].finish_reason == "stop"
+```
+
+```python Multiple tool calls in one response
+messages = [
+    {"role": "system", "content": "You are marco-code..."},
+    {"role": "user", "content": "Copy config.json to backup.json"}
+]
+
+response = call_model(messages, TOOL_DEFINITIONS)
+
+# Response may request multiple tools:
+# 1. read("config.json")
+# 2. write("backup.json", content)
+```
+
+```python Text response without tools
+messages = [
+    {"role": "system", "content": "You are marco-code..."},
+    {"role": "user", "content": "What is your purpose?"}
+]
+
+response = call_model(messages, TOOL_DEFINITIONS)
+
+# Response with just text:
+# response.choices[0].message.content == "I am marco-code, a minimal coding assistant..."
+# response.choices[0].finish_reason == "stop"
+# response.choices[0].message.tool_calls is None
+```
+
+</CodeGroup>
+
+## Error Handling
+
+### Missing API Key
+
+```python
+# If OPENROUTER_API_KEY is not set:
+response = call_model(messages, tools)
+# Raises: RuntimeError: OPENROUTER_API_KEY is not set
+```
+
+### API Errors
+
+```python
+# Network errors, rate limits, invalid requests, etc.
+try:
+    response = call_model(messages, tools)
+except Exception as e:
+    # Handle API errors
+    print(f"API error: {e}")
+```
+
+### Empty Response
+
+```python
+response = call_model(messages, tools)
+
+if not response.choices or len(response.choices) == 0:
+    raise RuntimeError("No choices in response")
+```
+
+The agent loop checks for empty responses and raises an error if the API returns no choices.
+
+## API Compatibility
+
+The function uses the OpenAI Python client with OpenRouter:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=OPENROUTER_API_KEY,
+    base_url="https://openrouter.ai/api/v1"
+)
+```
+
+**Compatibility notes:**
+- OpenRouter provides an OpenAI-compatible API
+- Same request/response format as OpenAI
+- Supports function calling (tool use)
+- Can route to multiple model providers (Anthropic, OpenAI, etc.)
+
+**Alternative providers:**
+To use a different provider, change the `base_url`:
+- OpenAI: `https://api.openai.com/v1`
+- Azure OpenAI: `https://{resource}.openai.azure.com/`
+- Anthropic: Would require switching to `anthropic` Python client (different API format)

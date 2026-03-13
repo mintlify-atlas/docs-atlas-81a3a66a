@@ -1,0 +1,327 @@
+---
+title: Examples
+description: Real-world usage scenarios with complete command → tool calls → response flows
+---
+
+These examples are based on actual test cases from `test_marco_code.py` and demonstrate common workflows.
+
+## Reading and Explaining Code
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "What does the _build_system_prompt function do?"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] read({'file_path': 'marco_code.py'})
+    ```
+  </Tab>
+  <Tab title="Response">
+    The `_build_system_prompt()` function creates the system message that the LLM receives at the start of every conversation. It includes:
+    
+    1. The assistant's identity and purpose
+    2. The current working directory (`os.getcwd()`)
+    3. Platform information (`platform.system()` and `platform.release()`)
+    
+    This context helps the assistant understand the user's environment without requiring them to specify it in prompts.
+  </Tab>
+</Tabs>
+
+## Creating New Files
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Create a utils/config.py file with a load_config function that reads JSON from a file"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] write({'file_path': 'utils/config.py', 'content': '...'})
+    ```
+    
+    <Note>
+    The `write` tool automatically creates the `utils/` directory if it doesn't exist (see `marco_code.py:99`).
+    </Note>
+  </Tab>
+  <Tab title="Response">
+    I've created `utils/config.py` with a `load_config()` function that:
+    - Opens and reads a JSON file
+    - Returns the parsed configuration dictionary
+    - Includes basic error handling for file not found and invalid JSON
+  </Tab>
+</Tabs>
+
+## Running Tests and Fixing Failures
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Run pytest on test_utils.py and fix any failures"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] bash({'command': 'pytest test_utils.py -v'})
+    [tool] read({'file_path': 'test_utils.py'})
+    [tool] read({'file_path': 'utils.py'})
+    [tool] write({'file_path': 'utils.py', 'content': '...'})
+    [tool] bash({'command': 'pytest test_utils.py -v'})
+    ```
+    
+    The assistant follows a systematic approach:
+    1. Run the tests to see what fails
+    2. Read the test file to understand expectations
+    3. Read the source code
+    4. Write corrected code
+    5. Re-run tests to verify the fix
+  </Tab>
+  <Tab title="Response">
+    Fixed the bug in `format_date()` - it was returning MM/DD/YYYY instead of YYYY-MM-DD. All tests now pass.
+  </Tab>
+</Tabs>
+
+## Checking Environment Setup
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Check if all dependencies from requirements.txt are installed"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] read({'file_path': 'requirements.txt'})
+    [tool] bash({'command': 'pip list'})
+    ```
+  </Tab>
+  <Tab title="Response">
+    All dependencies are installed:
+    - pytest 8.0.0 ✓
+    - requests 2.31.0 ✓
+    - python-dotenv 1.0.0 ✓
+  </Tab>
+</Tabs>
+
+## Refactoring Code
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Extract the validation logic from process_user_input() into a separate validate_input() function"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] read({'file_path': 'app.py'})
+    [tool] write({'file_path': 'app.py', 'content': '...'})
+    ```
+  </Tab>
+  <Tab title="Response">
+    Refactored the validation logic:
+    - Created new `validate_input()` function with the validation rules
+    - Updated `process_user_input()` to call the new function
+    - Behavior is unchanged, but code is now more modular and testable
+  </Tab>
+</Tabs>
+
+## Multi-File Analysis
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Find all functions that call process_data() across the codebase"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] bash({'command': 'grep -r "process_data()" --include="*.py" .'})
+    [tool] read({'file_path': './app.py'})
+    [tool] read({'file_path': './workers/processor.py'})
+    [tool] read({'file_path': './tests/test_processor.py'})
+    ```
+    
+    The assistant uses grep to locate files, then reads them for context.
+  </Tab>
+  <Tab title="Response">
+    Found 3 callers of `process_data()`:
+    
+    1. `app.py:45` - main handler in `handle_request()`
+    2. `workers/processor.py:23` - batch processing in `process_batch()`
+    3. `tests/test_processor.py:67` - test fixture
+  </Tab>
+</Tabs>
+
+## Debugging with Error Context
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "I'm getting KeyError: 'user_id' when running the app. Find and fix it."
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] bash({'command': 'grep -r "user_id" --include="*.py" .'})
+    [tool] read({'file_path': './handlers/auth.py'})
+    [tool] write({'file_path': './handlers/auth.py', 'content': '...'})
+    ```
+  </Tab>
+  <Tab title="Response">
+    Found the issue in `handlers/auth.py:34`. The code was accessing `data['user_id']` directly without checking if the key exists.
+    
+    Fixed by changing:
+    ```python
+    user_id = data['user_id']  # KeyError if missing
+    ```
+    
+    To:
+    ```python
+    user_id = data.get('user_id')
+    if not user_id:
+        return {"error": "user_id is required"}, 400
+    ```
+  </Tab>
+</Tabs>
+
+## Generating Documentation
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Read api.py and create a README.md documenting all the API endpoints"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] read({'file_path': 'api.py'})
+    [tool] write({'file_path': 'README.md', 'content': '...'})
+    ```
+  </Tab>
+  <Tab title="Response">
+    Created README.md with documentation for all 5 endpoints:
+    - GET /users
+    - POST /users
+    - GET /users/:id
+    - PUT /users/:id
+    - DELETE /users/:id
+    
+    Each entry includes the HTTP method, path, parameters, and response format.
+  </Tab>
+</Tabs>
+
+## Code Review Tasks
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Review database.py for security issues and potential SQL injection vulnerabilities"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] read({'file_path': 'database.py'})
+    ```
+  </Tab>
+  <Tab title="Response">
+    Found 2 security concerns:
+    
+    1. **SQL Injection Risk** in `get_user_by_name()` (line 45):
+       ```python
+       cursor.execute(f"SELECT * FROM users WHERE name = '{name}'")
+       ```
+       Use parameterized queries instead:
+       ```python
+       cursor.execute("SELECT * FROM users WHERE name = ?", (name,))
+       ```
+    
+    2. **Hardcoded credentials** (line 12):
+       ```python
+       PASSWORD = "admin123"
+       ```
+       Move to environment variables or a config file not in version control.
+  </Tab>
+</Tabs>
+
+## Complex Multi-Step Workflow
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    marco-code -p "Create a new feature: add a cache layer to the get_user() function using functools.lru_cache, update the tests, and verify they pass"
+    ```
+  </Tab>
+  <Tab title="Tool Calls">
+    ```
+    [tool] read({'file_path': 'users.py'})
+    [tool] write({'file_path': 'users.py', 'content': '...'})
+    [tool] read({'file_path': 'tests/test_users.py'})
+    [tool] write({'file_path': 'tests/test_users.py', 'content': '...'})
+    [tool] bash({'command': 'pytest tests/test_users.py -v'})
+    ```
+    
+    This demonstrates the assistant handling:
+    1. Reading existing code
+    2. Making modifications
+    3. Updating tests
+    4. Verifying the changes work
+  </Tab>
+  <Tab title="Response">
+    Completed the cache implementation:
+    
+    ✅ Added `@lru_cache(maxsize=128)` decorator to `get_user()`
+    ✅ Updated tests to verify caching behavior
+    ✅ All 8 tests pass
+    
+    The function now caches up to 128 user lookups, which should significantly reduce database queries for frequently accessed users.
+  </Tab>
+</Tabs>
+
+## Patterns from Test Suite
+
+These examples mirror the test cases in `test_marco_code.py`:
+
+### Simple Text Response (test_marco_code.py:132)
+```bash
+marco-code -p "say hello"
+# LLM responds immediately without tool calls
+```
+
+### Tool Call Then Stop (test_marco_code.py:148)
+```bash
+marco-code -p "read data.txt and summarize it"
+# [tool] read({'file_path': 'data.txt'})
+# Response: The file contains...
+```
+
+### Multiple Sequential Tool Calls
+```bash
+marco-code -p "count Python files and calculate total lines of code"
+# [tool] bash({'command': 'find . -name "*.py" | wc -l'})
+# [tool] bash({'command': 'find . -name "*.py" | xargs wc -l | tail -1'})
+# Response: Found 15 Python files with 3,542 total lines.
+```
+
+<Warning>
+If the assistant reaches `MAX_ITERATIONS` (10), you'll see:
+```
+Warning: reached maximum iterations (10)
+```
+
+This means the task was too complex for a single invocation. Break it into smaller prompts.
+</Warning>
+
+## Tips for Complex Tasks
+
+1. **Be Specific**: "Add type hints to all functions in utils.py" vs "improve utils.py"
+2. **Provide Context**: "The tests are failing with AssertionError on line 45" vs "tests are broken"
+3. **Check Tool Calls**: Watch stderr to understand the assistant's approach
+4. **Iterate if Needed**: If hitting max iterations, continue with a follow-up prompt
+
+## Next Steps
+
+<Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+  Encountering errors? Check the troubleshooting guide for solutions.
+</Card>

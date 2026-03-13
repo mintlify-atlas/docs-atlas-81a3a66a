@@ -1,0 +1,87 @@
+---
+title: Installation
+description: Install marco-code and configure your environment
+---
+
+## Prerequisites
+
+marco-code requires **Python 3.10 or higher**. Verify your Python version:
+
+```bash
+python --version
+```
+
+## Install via pip
+
+<Steps>
+  <Step title="Install the package">
+    Install marco-code using pip:
+
+    ```bash
+    pip install marco-code
+    ```
+  </Step>
+
+  <Step title="Set up your API key">
+    marco-code uses OpenRouter to access LLM models. You'll need an OpenRouter API key.
+
+    Create a `.env` file in your project directory (or set environment variables):
+
+    ```bash
+    OPENROUTER_API_KEY=your-key-here
+    OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+    ```
+
+    <Note>
+      Get your API key from [OpenRouter](https://openrouter.ai/). The `OPENROUTER_BASE_URL` is optional and defaults to `https://openrouter.ai/api/v1`.
+    </Note>
+  </Step>
+
+  <Step title="Verify the installation">
+    Test that marco-code is installed correctly:
+
+    ```bash
+    marco-code -p "say hello"
+    ```
+
+    You should see a response from the assistant. If you get an error about `OPENROUTER_API_KEY`, make sure your `.env` file is in the current directory or that you've set the environment variable.
+  </Step>
+</Steps>
+
+## Environment Variables
+
+marco-code reads configuration from environment variables (via `.env` or shell exports):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENROUTER_API_KEY` | Yes | - | Your OpenRouter API key |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenRouter API endpoint |
+
+<Warning>
+  Never commit your `.env` file or API keys to version control. Add `.env` to your `.gitignore`.
+</Warning>
+
+## Troubleshooting
+
+### "OPENROUTER_API_KEY is not set"
+
+This error means marco-code can't find your API key. Make sure:
+- Your `.env` file is in the directory where you're running the command
+- The environment variable is exported if not using `.env`
+- There are no typos in the variable name
+
+### Python version too old
+
+If you see a version error, upgrade Python:
+
+```bash
+# Using pyenv (recommended)
+pyenv install 3.10
+pyenv local 3.10
+
+# Or upgrade system Python (varies by OS)
+```
+
+## Next Steps
+
+Now that marco-code is installed, learn how to use it in the [Quickstart](/quickstart) guide.

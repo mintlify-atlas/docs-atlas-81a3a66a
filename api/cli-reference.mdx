@@ -1,0 +1,131 @@
+---
+title: CLI Reference
+description: Command-line interface documentation for marco-code
+---
+
+## Command Syntax
+
+```bash
+marco-code -p "<prompt>"
+```
+
+marco-code is invoked from the command line with a single required prompt argument. The assistant executes an agent loop, calling tools as needed until it can respond to your request.
+
+## Arguments
+
+<ParamField path="-p" type="string" required>
+  The prompt to send to the assistant. This describes the task you want marco-code to perform.
+  
+  **Example:**
+  ```bash
+  marco-code -p "Read config.json and list all API endpoints"
+  ```
+</ParamField>
+
+<ParamField path="-h, --help" type="flag">
+  Display help information and exit.
+</ParamField>
+
+## Environment Variables
+
+marco-code requires the following environment variables:
+
+<ParamField path="OPENROUTER_API_KEY" type="string" required>
+  Your OpenRouter API key for accessing the LLM.
+  
+  **Error if missing:**
+  ```
+  RuntimeError: OPENROUTER_API_KEY is not set
+  ```
+</ParamField>
+
+<ParamField path="OPENROUTER_BASE_URL" type="string" default="https://openrouter.ai/api/v1">
+  The OpenRouter API base URL. Defaults to the standard OpenRouter endpoint.
+</ParamField>
+
+## Configuration
+
+The following constants control agent behavior:
+
+- **MAX_ITERATIONS**: `10` - Maximum number of agent loop iterations before terminating
+- **BASH_TIMEOUT**: `30` seconds - Timeout for bash command execution
+- **MODEL**: `anthropic/claude-haiku-4.5` - The LLM model used for responses
+
+## Exit Behavior
+
+### Successful Completion
+
+When the LLM completes the task (finish_reason="stop"), marco-code prints the final response and exits with code 0:
+
+```bash
+$ marco-code -p "Create hello.txt with 'Hello World'"
+I've created hello.txt with the content "Hello World".
+$ echo $?
+0
+```
+
+### Maximum Iterations Reached
+
+If the agent loop reaches MAX_ITERATIONS (10) without completion, a warning is printed to stderr:
+
+```
+Warning: reached maximum iterations (10)
+```
+
+The last message content (if any) is still printed to stdout.
+
+### Error Cases
+
+marco-code will exit with a non-zero code if:
+- `OPENROUTER_API_KEY` is not set
+- The API returns no choices in the response
+- An unhandled exception occurs
+
+## Usage Examples
+
+<CodeGroup>
+
+```bash Read a file
+marco-code -p "Read the contents of README.md"
+```
+
+```bash Write a file
+marco-code -p "Create a Python script that prints 'Hello World'"
+```
+
+```bash Execute commands
+marco-code -p "List all Python files in the current directory"
+```
+
+```bash Complex task
+marco-code -p "Read config.json, validate the API endpoints, and write a report to report.txt"
+```
+
+</CodeGroup>
+
+## Tool Call Output
+
+During execution, marco-code prints tool calls to stderr in the format:
+
+```
+  [tool] read({'file_path': 'config.json'})
+  [tool] write({'file_path': 'output.txt', 'content': '...'})
+  [tool] bash({'command': 'ls -la'})
+```
+
+This allows you to track what actions the assistant is taking without interfering with stdout output.
+
+## System Context
+
+The assistant receives system context automatically:
+
+```
+You are marco-code, a minimal coding assistant.
+You help users with software engineering tasks by reading files,
+writing files, and executing shell commands.
+
+Working directory: /path/to/current/directory
+Platform: Linux 5.15.0
+```
+
+This context helps the assistant understand the environment it's operating in.
